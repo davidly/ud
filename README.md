@@ -4,7 +4,7 @@ Update Delay. Windows command-line tool that shows in milliseconds how long it's
 This is useful for things like measuring runtime of an app when there is no reasonable mechanism to do so. For
 example, when an emulated app is running in an emulator window (Apple 1, CP/M, etc.).
 
-Build in a MSVC VCVars32 build window like this:
+Build in a MSVC VCVars64 (or 32 without the _AMD64_ below) build window like this:
 
     cl /nologo ud.cxx /I.\ /Ox /Qpar /O2 /Oi /Ob2 /EHac /Zi /Gy /DNDEBUG /DUNICODE /D_AMD64_ /link ntdll.lib /OPT:REF
     
