@@ -130,16 +130,16 @@ bool HasBitmapChanged( HBITMAP hbLatest, HDC hdcMem )
         }
         else
         {
-            DeleteObject( hbPrior );
+            if ( 0 != hbPrior )
+                DeleteObject( hbPrior );
+
             hbPrior = hbLatest;
-            //SaveHBitmap( hbPrior, L"latest.png" );
         }
     }
     else
     {
         hbPrior = hbLatest;
         identical = true;
-        //SaveHBitmap( hbPrior, L"initial.png" );
     }
 
     return !identical;
@@ -260,8 +260,11 @@ BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
                                     long long delta = duration_cast<std::chrono::milliseconds>( tNow - tPrior ).count();
                                     tPrior = tNow;
 
-                                    if ( ( 0 != shownSoFar ) && ( 0 == ( shownSoFar % 8 ) ) )
+                                    if ( ( 0 != shownSoFar ) && ( 0 == ( shownSoFar % 10 ) ) )
+                                    {
+                                        shownSoFar = 0;
                                         printf( "\n" );
+                                    }
 
                                     printf( "%8lld, ", delta ); // 99999 seconds: max of about 27 hours 
                                     shownSoFar++;
@@ -396,7 +399,7 @@ extern "C" int wmain( int argc, WCHAR * argv[] )
         if ( g_Enumerate)
             break;
 
-        bool worked = wait.WaitInMS( 10 );
+        bool worked = wait.WaitInMS( 20 );
         if ( !worked )
             printf( "wait failed, error %d\n", GetLastError() );
     } while ( true );
