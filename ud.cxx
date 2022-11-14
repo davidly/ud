@@ -49,7 +49,7 @@ void Usage( const char * pcMessage = 0 )
     printf( "      and transparent outer edges for borders that are in fact wide\n" );
     printf( "    - 'modern' app client area includes the chrome\n" );
     printf( "    - doesn't work when a screen saver or lock screen appears\n" );
-    printf( "    - Only accurate within perhaps 1/5 of a second; it's not precise.\n" );
+    printf( "    - only accurate within perhaps 1/5 of a second; it's not precise.\n" );
     exit( 0 );
 } //Usage
 
@@ -143,9 +143,116 @@ bool HasBitmapChanged( HBITMAP hbLatest, HDC hdcMem )
     }
 
     return !identical;
-} //CompareBitmaps   
+} //HasBitmapChanged
 
 high_resolution_clock::time_point tPrior;
+
+void CheckIfWindowChanged( HWND hwnd, RECT & rcWindow )
+{
+    HDC hdcDesktop = GetDC( 0 );
+    if ( 0 != hdcDesktop )
+    {
+        int ret;
+        HDC hdcMem = CreateCompatibleDC( hdcDesktop );
+        if ( 0 != hdcMem )
+        {
+            int width = rcWindow.right - rcWindow.left;
+            int height = rcWindow.bottom - rcWindow.top;
+            int sourceX = rcWindow.left;
+            int sourceY = rcWindow.top;
+
+            if ( g_Verbose )
+            {
+                printf( "original window left and top: %d %d\n", rcWindow.left, rcWindow.top );
+                printf( "original window right and bottom: %d %d\n", rcWindow.right, rcWindow.bottom );
+                printf( "sourceX %d sourceY %d, copy width %d height %d\n", sourceX, sourceY, width, height );
+            }
+
+            RECT rectClient;
+            if ( !g_WholeWindow && GetClientRect( hwnd, & rectClient ) )
+            {
+                if ( g_Verbose )
+                    printf( "client rect: %d %d %d %d\n", rectClient.left, rectClient.top, rectClient.right, rectClient.bottom );
+
+                width = rectClient.right;
+                height = rectClient.bottom;
+
+                POINT ptUL = { 0, 0 };
+                MapWindowPoints( hwnd, HWND_DESKTOP, & ptUL, 1 );
+
+                sourceX = ptUL.x;
+                sourceY = ptUL.y;
+
+                if ( g_Verbose )
+                    printf( "final sourceX %d, sourceY %d, width %d, height %d\n", sourceX, sourceY, width, height );
+            }
+
+            HBITMAP hbMem = CreateCompatibleBitmap( hdcDesktop, width, height );
+            if ( 0 != hbMem )
+            {
+                HANDLE hbOld = SelectObject( hdcMem, hbMem );
+                BOOL bltOK = BitBlt( hdcMem, 0, 0, width, height, hdcDesktop, sourceX, sourceY, SRCCOPY );
+                SelectObject( hdcMem, hbOld );
+
+                if ( bltOK )
+                {
+                    // transfer ownership of the bitmap with this call
+
+                    if ( HasBitmapChanged( hbMem, hdcMem ) )
+                    {
+                        static int shownSoFar = 0;
+                        high_resolution_clock::time_point tNow = high_resolution_clock::now();
+                        long long delta = duration_cast<std::chrono::milliseconds>( tNow - tPrior ).count();
+                        tPrior = tNow;
+
+                        if ( ( 0 != shownSoFar ) && ( 0 == ( shownSoFar % 10 ) ) )
+                        {
+                            shownSoFar = 0;
+                            printf( "\n" );
+                        }
+
+                        printf( "%8lld, ", delta ); // 99999 seconds: max of about 27 hours 
+                        shownSoFar++;
+
+                        if ( g_Verbose )
+                            printf( "gdi count %d user count %d\n", GetGuiResources( GetCurrentProcess(), 0 ),
+                                                                    GetGuiResources( GetCurrentProcess(), 1 ) );
+                    }
+
+                    // HasBitmapChanged is responsible for freeing this
+
+                    hbMem = 0;
+                }
+                else
+                {
+                    // If it's 6 == ERROR_INVALID_HANDLE it's likely due a screen saver or lock screen running.
+                    // The calls to get the handles are all checked so they should be valid aside from that case.
+
+                    int err = GetLastError();
+                    if ( ERROR_INVALID_HANDLE != err )
+                        printf( "unable to blt from the desktop to the memory hdc, error %d\n", err );
+                }
+
+                if ( hbMem )
+                    DeleteObject( hbMem );
+            }
+            else
+                printf( "unable create create a compatible Bitmap\n" );
+
+            ret = DeleteDC( hdcMem ); // from Create(), not Get()
+            if ( 0 == ret )
+                printf( "can't delete hdcMem: %d\n", GetLastError() );
+        }
+        else
+            printf( "unable to get the compatible memory hdc, error %d\n", GetLastError() );
+
+        ret = ReleaseDC( 0, hdcDesktop ); // from Get(), not Create()
+        if ( 0 == ret )
+            printf( "can't ReleaseDC hdcDesktop: %d\n", GetLastError() );
+    }
+    else
+        printf( "unable to get the desktop hdc, error %d\n", GetLastError() );
+} //CheckIfWindowChanged
 
 BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
 {
@@ -205,108 +312,8 @@ BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
             if ( std::regex_match( text, e ) || procId == g_AppId || hwnd == (HWND) g_AppId )
             {
                 g_FoundMatchingWindow = true;
-                HDC hdcDesktop = GetDC( 0 );
-                if ( 0 != hdcDesktop )
-                {
-                    HDC hdcMem = CreateCompatibleDC( hdcDesktop );
-                    if ( 0 != hdcMem )
-                    {
-                        int width = rcWindow.right - rcWindow.left;
-                        int height = rcWindow.bottom - rcWindow.top;
-                        int sourceX = rcWindow.left;
-                        int sourceY = rcWindow.top;
 
-                        if ( g_Verbose )
-                        {
-                            printf( "original window left and top: %d %d\n", rcWindow.left, rcWindow.top );
-                            printf( "original window right and bottom: %d %d\n", rcWindow.right, rcWindow.bottom );
-                            printf( "sourceX %d sourceY %d, copy width %d height %d\n", sourceX, sourceY, width, height );
-                        }
-
-                        RECT rectClient;
-                        if ( !g_WholeWindow && GetClientRect( hwnd, & rectClient ) )
-                        {
-                            if ( g_Verbose )
-                                printf( "client rect: %d %d %d %d\n", rectClient.left, rectClient.top, rectClient.right, rectClient.bottom );
-
-                            width = rectClient.right;
-                            height = rectClient.bottom;
-
-                            POINT ptUL = { 0, 0 };
-                            MapWindowPoints( hwnd, HWND_DESKTOP, & ptUL, 1 );
-
-                            sourceX = ptUL.x;
-                            sourceY = ptUL.y;
-
-                            if ( g_Verbose )
-                                printf( "final sourceX %d, sourceY %d, width %d, height %d\n", sourceX, sourceY, width, height );
-                        }
-
-                        HBITMAP hbMem = CreateCompatibleBitmap( hdcDesktop, width, height );
-                        if ( 0 != hbMem )
-                        {
-                            HANDLE hbOld = SelectObject( hdcMem, hbMem );
-                            BOOL bltOK = BitBlt( hdcMem, 0, 0, width, height, hdcDesktop, sourceX, sourceY, SRCCOPY );
-                            SelectObject( hdcMem, hbOld );
-
-                            if ( bltOK )
-                            {
-                                // transfer ownership of the bitmap with this call
-
-                                if ( HasBitmapChanged( hbMem, hdcMem ) )
-                                {
-                                    static int shownSoFar = 0;
-                                    high_resolution_clock::time_point tNow = high_resolution_clock::now();
-                                    long long delta = duration_cast<std::chrono::milliseconds>( tNow - tPrior ).count();
-                                    tPrior = tNow;
-
-                                    if ( ( 0 != shownSoFar ) && ( 0 == ( shownSoFar % 10 ) ) )
-                                    {
-                                        shownSoFar = 0;
-                                        printf( "\n" );
-                                    }
-
-                                    printf( "%8lld, ", delta ); // 99999 seconds: max of about 27 hours 
-                                    shownSoFar++;
-
-                                    if ( g_Verbose )
-                                        printf( "gdi count %d user count %d\n", GetGuiResources( GetCurrentProcess(), 0 ),
-                                                                                GetGuiResources( GetCurrentProcess(), 1 ) );
-                                }
-
-                                // HasBitmapChanged is responsible for freeing this
-
-                                hbMem = 0;
-                            }
-                            else
-                            {
-                                // If it's 6 == ERROR_INVALID_HANDLE it's likely due a screen saver or lock screen running.
-                                // The calls to get the handles are all checked so they should be valid aside from that case.
-
-                                int err = GetLastError();
-                                if ( ERROR_INVALID_HANDLE != err )
-                                    printf( "unable to blt from the desktop to the memory hdc, error %d\n", err );
-                            }
-
-                            if ( hbMem )
-                                DeleteObject( hbMem );
-                        }
-                        else
-                            printf( "unable create create a compatible Bitmap\n" );
-
-                        ret = DeleteDC( hdcMem ); // from Create(), not Get()
-                        if ( 0 == ret )
-                            printf( "can't delete hdcMem: %d\n", GetLastError() );
-                    }
-                    else
-                        printf( "unable to get the compatible memory hdc, error %d\n", GetLastError() );
-
-                    ret = ReleaseDC( 0, hdcDesktop ); // from Get(), not Create()
-                    if ( 0 == ret )
-                        printf( "can't ReleaseDC hdcDesktop: %d\n", GetLastError() );
-                }
-                else
-                    printf( "unable to get the desktop hdc, error %d\n", GetLastError() );
+                CheckIfWindowChanged( hwnd, rcWindow );
 
                 return false; // end the enumeration early because we found the window
             }
@@ -390,8 +397,9 @@ extern "C" int wmain( int argc, WCHAR * argv[] )
     }
 
     CWaitPrecise wait;
-
     tPrior = high_resolution_clock::now();
+
+    // look up the window each time so it can come and go without restarting this app.
 
     do
     {
