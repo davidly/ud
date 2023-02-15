@@ -1,5 +1,8 @@
 //
 // Update Delay: shows the delta in time since the last update to the view of a given app
+// Very little is cached between checks -- e.g. the window is found again each loop and the
+// bits from the prior bitmap are retrieved each time. But that's all really cheap and this
+// enables timed apps to come and go without restarting UD.
 //
 
 #include <windows.h>
@@ -53,10 +56,9 @@ void Usage( const char * pcMessage = 0 )
     exit( 0 );
 } //Usage
 
-bool g_Enumerate = true;                                        // enumerate windows; don't capture bitmap
+bool g_Enumerate = true;                                        // enumerate windows; don't check for updates
 bool g_WholeWindow = false;                                     // the whole window, not just the client area
 bool g_Verbose = false;                                         // print debug information
-bool g_FoundMatchingWindow = false;                             // did we find a matching window?
 WCHAR g_AppName[ MAX_PATH ] = {0};                              // name of the app to find, can contain wildcards
 WCHAR g_AppNameRegex[ 3 * _countof( g_AppName ) ] = {0};        // regex equivalent of g_AppName
 unsigned long long g_AppId = 0;                                 // hwnd or procid to use instead of g_AppName
@@ -109,16 +111,7 @@ bool HasBitmapChanged( HBITMAP hbLatest, HDC hdcMem )
                 if ( response != height )
                     printf( "unexpected response %d from GetDIBits for prior bitmap\n", response );
 
-                identical = true;
-                for ( size_t x = 0; x < extent; x++ )
-                {
-                    //printf( "%#x, ", priorbits[ x ] );
-                    if ( priorbits[ x ] != latestbits[ x ] )
-                    {
-                        identical = false;
-                        break;
-                    }
-                }
+                identical = ( 0 == memcmp( priorbits.data(), latestbits.data(), extent * sizeof DWORD ) );
             }
         }
         else
@@ -205,6 +198,8 @@ void CheckIfWindowChanged( HWND hwnd, RECT & rcWindow )
                         long long delta = duration_cast<std::chrono::milliseconds>( tNow - tPrior ).count();
                         tPrior = tNow;
 
+                        // every ten times output a carriage return
+
                         if ( ( 0 != shownSoFar ) && ( 0 == ( shownSoFar % 10 ) ) )
                         {
                             shownSoFar = 0;
@@ -275,12 +270,6 @@ BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
     if ( ( 0 != consoleTitleLen ) && !wcscmp( awcConsole, awcText ) )
         return true;
 
-    // 0x2000 - 0x206f is punctuation, which printf handles badly. convert to spaces
-
-    for ( int i = 0; i < len; i++ )
-        if ( awcText[ i ] >= 0x2000 && awcText[ i ] <= 0x206f )
-            awcText[ i ] = ' ';
-
     DWORD procId = 0;
     GetWindowThreadProcessId( hwnd, & procId );
 
@@ -300,6 +289,12 @@ BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
 
         if ( g_Enumerate )
         {
+            // 0x2000 - 0x206f is punctuation, which printf handles badly. convert to spaces
+        
+            for ( int i = 0; i < len; i++ )
+                if ( awcText[ i ] >= 0x2000 && awcText[ i ] <= 0x206f )
+                    awcText[ i ] = ' ';
+
             printf( " %6d %6d %6d %6d %#10llx %#5d '%ws'\n",
                     rcWindow.left, rcWindow.top, rcWindow.right, rcWindow.bottom, (__int64) hwnd, procId, awcText );
         }
@@ -311,8 +306,6 @@ BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
 
             if ( std::regex_match( text, e ) || procId == g_AppId || hwnd == (HWND) g_AppId )
             {
-                g_FoundMatchingWindow = true;
-
                 CheckIfWindowChanged( hwnd, rcWindow );
 
                 return false; // end the enumeration early because we found the window
@@ -404,10 +397,10 @@ extern "C" int wmain( int argc, WCHAR * argv[] )
     do
     {
         EnumWindows( EnumWindowsProc, 0 );
-        if ( g_Enumerate)
+        if ( g_Enumerate )
             break;
 
-        bool worked = wait.WaitInMS( 20 );
+        bool worked = wait.WaitInMS( 1 );
         if ( !worked )
             printf( "wait failed, error %d\n", GetLastError() );
     } while ( true );
