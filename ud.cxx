@@ -251,6 +251,7 @@ void CheckIfWindowChanged( HWND hwnd, RECT & rcWindow )
 
 BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
 {
+    UNREFERENCED_PARAMETER( lParam );
     BOOL visible = IsWindowVisible( hwnd );
     if ( !visible )
         return true;
@@ -279,7 +280,6 @@ BOOL CALLBACK EnumWindowsProc( HWND hwnd, LPARAM lParam )
     if ( !ok )
         return true;
 
-    int ret = 0;
     WINDOWINFO wi;
     wi.cbSize = sizeof wi;
     ok = GetWindowInfo( hwnd, & wi );
@@ -330,7 +330,7 @@ extern "C" int wmain( int argc, WCHAR * argv[] )
 
         if ( L'-' == parg[0] || L'/' == parg[0] )
         {
-            WCHAR p = tolower( parg[1] );
+            WCHAR p = (WCHAR) tolower( parg[1] );
 
             if ( 'w' == p )
                 g_WholeWindow = true;
@@ -341,12 +341,12 @@ extern "C" int wmain( int argc, WCHAR * argv[] )
         }
         else if ( 0 == g_AppName[ 0 ] )
         {
-            wcscpy( g_AppName, parg );
+            wcscpy_s( g_AppName, _countof( g_AppName ), parg );
             g_Enumerate = false;
 
             int r = 0;
-            int len = wcslen( g_AppName );
-            for ( int i = 0; i < len; i++ )
+            size_t len = wcslen( g_AppName );
+            for ( size_t i = 0; i < len; i++ )
             {
                 WCHAR c = g_AppName[ i ];
 
